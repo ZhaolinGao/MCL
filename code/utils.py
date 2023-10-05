@@ -106,7 +106,7 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 def getFileName(args):
-    path = "./checkpoints"
+    path = "../checkpoints"
     file = f"{args.dataset}-{args.layer}-{args.dim}-{args.alpha}-{args.beta}-{args.lamb_p}-{args.lamb_n}.pth.tar"
     return os.path.join(path,file)
 

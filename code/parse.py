@@ -20,8 +20,6 @@ def parse_args():
     parser.add_argument('--topks', nargs='?',default="[5, 10, 20]",
                         help="@k test list")
 
-    parser.add_argument('--tensorboard', type=int,default=1,
-                        help="enable tensorboard")
     parser.add_argument('--load', type=int, default=0)
     parser.add_argument('--multicore', type=int, default=1, help='whether we use multiprocessing or not in test')
     parser.add_argument('--pretrain', type=int, default=0, help='whether we use pretrained weight or not')
@@ -31,7 +29,7 @@ def parse_args():
     parser.add_argument('--dropout', type=int,default=0,
                         help="using the dropout or not")
     parser.add_argument('--keep_prob', type=float,default=0.8,
-                        help="the batch size for bpr loss training procedure")
+                        help="dropout hyperparameter")
 
     # model parameters
     parser.add_argument('--epochs', type=int, default=1000)
@@ -50,7 +48,13 @@ def parse_args():
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
     parser.add_argument('--decay', type=float, default=1e-4, help="the weight decay for l2 normalizaton")
     
-    # Loss arguments
+    # loss
+    parser.add_argument('--loss', type=str, default='bpr', help="[bpr, triplet, mcl]")
+
+    # triplet arguments
+    parser.add_argument('--lamb', type=float, default=1.0, help="margin for the triplet loss")
+    
+    # MCL arguments
     parser.add_argument('--margin', type=float, default=1.0, help="margin for the metric loss")
     parser.add_argument('--alpha', type=float, default=1.25, help="pos, alpha for mul loss")
     parser.add_argument('--beta', type=float, default=5.0, help="neg, beta for mul loss")

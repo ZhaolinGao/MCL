@@ -14,7 +14,7 @@ import multiprocessing
 
 CORES = 1
 
-def Metric_train_original(args, dataset, model, loss_class, epoch, sampler, w=None):
+def Metric_train_original(args, dataset, model, loss_class, epoch, sampler):
     Recmodel = model
     Recmodel.train()
     metric = loss_class
@@ -32,13 +32,13 @@ def Metric_train_original(args, dataset, model, loss_class, epoch, sampler, w=No
 
         aver_metric_loss += metric_loss
         aver_reg_loss += reg_loss
-        if args.tensorboard:
-            w.add_scalar(f'MetricLoss/BPR', metric_loss, epoch * total_batch + k)
-            w.add_scalar(f'RegLoss/BPR', reg_loss, epoch * total_batch + k)
+
     aver_metric_loss = aver_metric_loss / total_batch
     aver_reg_loss = aver_reg_loss / total_batch
 
-    return f"aver metric loss{aver_metric_loss:.3e}, aver reg loss{aver_reg_loss:.3e}"
+    user_norm, item_norm = Recmodel.embedding_norm()
+
+    return f"aver metric loss {aver_metric_loss:.3e}, aver reg loss {aver_reg_loss:.3e}, aver user norm {user_norm:.3e}, aver item norm {item_norm:.3e}"
     
 def ndcg_func(ground_truths, ranks):
     result = 0
@@ -83,7 +83,7 @@ def test_one_batch(X):
             'precision':np.array(pre), 
             'ndcg':np.array(ndcg)}
             
-def Test(args, dataset, Recmodel, epoch, device, w=None, multicore=0):
+def Test(args, dataset, Recmodel, epoch, device, multicore=0):
 
     u_batch_size = args.testbatch
     testDict = dataset.testDict
@@ -122,7 +122,12 @@ def Test(args, dataset, Recmodel, epoch, device, w=None, multicore=0):
             batch_users_gpu = torch.Tensor(batch_users).long()
             batch_users_gpu = batch_users_gpu.to(device)
             users_emb = all_users[batch_users_gpu.long()].unsqueeze(1)
-            rating = -torch.sum((users_emb - items_emb) ** 2, 2)
+
+            if args.loss == 'mcl' or args.loss == 'triplet':
+                rating = -torch.sum((users_emb - items_emb) ** 2, 2)
+            elif args.loss == 'bpr':
+                rating = torch.sum(torch.mul(users_emb, items_emb), 2)
+
             avg_dist -= rating.mean().item() / float(total_batch)
             
             exclude_index = []
@@ -158,13 +163,6 @@ def Test(args, dataset, Recmodel, epoch, device, w=None, multicore=0):
         results['precision'] /= float(len(users))
         results['ndcg'] /= float(len(users))
 
-        if args.tensorboard:
-            w.add_scalars(f'Test/Recall@{topks}',
-                          {str(topks[i]): results['recall'][i] for i in range(len(topks))}, epoch)
-            w.add_scalars(f'Test/Precision@{topks}',
-                          {str(topks[i]): results['precision'][i] for i in range(len(topks))}, epoch)
-            w.add_scalars(f'Test/NDCG@{topks}',
-                          {str(topks[i]): results['ndcg'][i] for i in range(len(topks))}, epoch)
         if multicore == 1:
             pool.close()
         print(results)

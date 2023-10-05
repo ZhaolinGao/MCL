@@ -36,6 +36,12 @@ class LightGCN(nn.Module):
         self.f = nn.Sigmoid()
         self.Graph = self.dataset.getSparseGraph()
 
+    def embedding_norm(self):
+        item_norm = torch.mean(torch.norm(self.embedding_item.weight, dim=1)).detach().cpu().item()
+        user_norm = torch.mean(torch.norm(self.embedding_user.weight, dim=1)).detach().cpu().item()
+
+        return user_norm, item_norm
+
     def __dropout_x(self, x, keep_prob):
         size = x.size()
         index = x.indices().t()
@@ -129,44 +135,57 @@ class LightGCN(nn.Module):
         reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
                    (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.args.num_neg)
 
-        # positive item to user distance (N)
-        pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
+        if self.args.loss == 'bpr':
+            pos_scores = torch.sum(torch.mul(users_emb, pos_emb), 1).unsqueeze(1)
+            neg_scores = torch.sum(torch.mul(users_emb.unsqueeze(1), neg_emb), 2)
+            loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
 
-        # distance to negative items (N x W)
-        distance_to_neg_items = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
-        min_neg_per_item = distance_to_neg_items.min(1)[0]
+        elif self.args.loss == 'triplet':
+            pos_scores = torch.sum((users_emb - pos_emb) ** 2, 1).unsqueeze(1)
+            neg_scores = torch.sum((users_emb.unsqueeze(1) - neg_emb) ** 2, 2)
+            loss = torch.mean(torch.relu(pos_scores - neg_scores + self.args.lamb))
 
-        # mining
-        start_idx = 0
-        pos_lengths = []
-        neg_length = []
-        for i in num_items_per_user:
+        else:
+            # positive item to user distance (N)
+            pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
 
-            max_pos_length = pos_distances[start_idx: start_idx+i].max()
-            pos_lengths.append(max_pos_length)
-            
-            min_neg_length = min_neg_per_item[start_idx: start_idx+i].min()
-            neg_length.append(min_neg_length)
-            
-            start_idx += i
+            # distance to negative items (N x W)
+            distance_to_neg_items = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
+            min_neg_per_item = distance_to_neg_items.min(1)[0]
 
-        num_items_per_user = torch.LongTensor(num_items_per_user)
+            # mining
+            start_idx = 0
+            pos_lengths = []
+            neg_length = []
+            for i in num_items_per_user:
 
-        pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
-        pos_lengths = pos_lengths.to(self.device)
-        neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
-        neg_length = neg_length.to(self.device)
+                max_pos_length = pos_distances[start_idx: start_idx+i].max()
+                pos_lengths.append(max_pos_length)
+                
+                min_neg_length = min_neg_per_item[start_idx: start_idx+i].min()
+                neg_length.append(min_neg_length)
+                
+                start_idx += i
 
-        # negative mining using max pos length
-        neg_idx = (distance_to_neg_items - (self.args.margin + pos_lengths.unsqueeze(-1))) >= 0
-        distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+            num_items_per_user = torch.LongTensor(num_items_per_user)
 
-        # positive mining using min neg length
-        pos_idx = (pos_distances - (neg_length - self.args.margin)) <= 0
-        pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+            pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
+            pos_lengths = pos_lengths.to(self.device)
+            neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
+            neg_length = neg_length.to(self.device)
 
-        # compute loss
-        neg_loss = 1.0 / self.args.beta * torch.log(1 + torch.sum(torch.exp(-self.args.beta * (distance_to_neg_items + self.args.lamb_n)))/self.args.batch_size)
-        pos_loss = 1.0 / self.args.alpha * torch.log(1 + torch.sum(torch.exp(self.args.alpha * (pos_distances + self.args.lamb_p)))/self.args.batch_size)
+            # negative mining using max pos length
+            neg_idx = (distance_to_neg_items - (self.args.margin + pos_lengths.unsqueeze(-1))) >= 0
+            distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+
+            # positive mining using min neg length
+            pos_idx = (pos_distances - (neg_length - self.args.margin)) <= 0
+            pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+
+            # compute loss
+            neg_loss = 1.0 / self.args.beta * torch.log(1 + torch.sum(torch.exp(-self.args.beta * (distance_to_neg_items + self.args.lamb_n)))/self.args.batch_size)
+            pos_loss = 1.0 / self.args.alpha * torch.log(1 + torch.sum(torch.exp(self.args.alpha * (pos_distances + self.args.lamb_p)))/self.args.batch_size)
         
-        return (neg_loss+pos_loss), reg_loss
+            loss = neg_loss+pos_loss
+        
+        return loss, reg_loss

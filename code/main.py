@@ -4,8 +4,6 @@ import numpy as np
 from os.path import join
 from parse import parse_args
 import Procedure
-# from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
 import time
 import torch
 import utils
@@ -33,14 +31,6 @@ if __name__ == '__main__':
         except FileNotFoundError:
             print(f"{weight_file} not exists, start from beginning")
 
-    # init tensorboard
-    if args.tensorboard:
-        w : SummaryWriter = SummaryWriter(
-                                join("./runs", time.strftime("%m-%d-%Hh%Mm%Ss-"))
-                            )
-    else:
-        w = None
-
     # init sampler
     sampler = utils.WarpSampler(dataset, args.batch_size, args.num_neg)
 
@@ -52,18 +42,18 @@ if __name__ == '__main__':
             print(f'Epoch {epoch}/{args.epochs}')
             start = time.time()
             if epoch % 10 == 0:
-                result = Procedure.Test(args, dataset, model, epoch, device, w, args.multicore)
+                result = Procedure.Test(args, dataset, model, epoch, device, args.multicore)
                 if np.sum(np.append(result['recall'], result['ndcg'])) > np.sum(best_result):
                     best_result = np.append(result['recall'], result['ndcg'])
                     torch.save(model.state_dict(), weight_file)
                 print("Best so far:", best_result)
 
-            output_information = Procedure.Metric_train_original(args, dataset, model, metric, epoch, sampler, w)
+            output_information = Procedure.Metric_train_original(args, dataset, model, metric, epoch, sampler)
 
             print(f'{output_information}')
             print(f"Total time {time.time() - start}")
         
-        result = Procedure.Test(args, dataset, model, epoch, device, w, args.multicore)
+        result = Procedure.Test(args, dataset, model, epoch, device, args.multicore)
         if np.sum(np.append(result['recall'], result['ndcg'])) > np.sum(best_result):
             best_result = np.append(result['recall'], result['ndcg'])
             torch.save(model.state_dict(), weight_file)
@@ -71,5 +61,3 @@ if __name__ == '__main__':
 
     finally:
         sampler.close()
-        if args.tensorboard:
-            w.close()
